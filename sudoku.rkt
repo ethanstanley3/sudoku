@@ -2,9 +2,34 @@
 
 (define r 3)
 (define c 3)
+(define cell-count (* r r c c))
 
 (define default-hints (build-list (* r c) (lambda (n) (+ n 1))))
 (define e default-hints)
+
+(define empty-board (make-list 9 (make-list 9 e)))
+
+(define hard-board
+        (list (list e 2 e e e e e e e)
+              (list e e e 6 e e e e 3)
+              (list e 7 4 e 8 e e e e)
+              (list e e e e e 3 e e 2)
+              (list e 8 e e 4 e e 1 e)
+              (list 6 e e 5 e e e e e)
+              (list e e e e 1 e 7 8 e)
+              (list 5 e e e e 9 e e e)
+              (list e e e e e e e 4 e)))
+
+(define medium-board
+        (list (list e e e 5 e 7 e e e)
+              (list e 4 e 2 6 3 e e e)
+              (list 1 e 7 4 e e e e e)
+              (list 3 6 e e e e e 4 5)
+              (list e e 2 e 5 e 7 e e)
+              (list 7 9 e e e e e 6 2)
+              (list e e e e e 9 4 e 1)
+              (list e e e 1 3 4 e 9 e)
+              (list e e e 6 e 5 e e e)))
 
 (define easy-board
     (list (list e e e 2 6 e 7 e 1) 
@@ -16,6 +41,17 @@
           (list e e 9 3 e e e 7 4)
           (list e 4 e e 5 e e 3 6)
           (list 7 e 3 e 1 8 e e e)))
+
+; (define easy-board
+;     (list (list e e e 2 e e 7 e 1) 
+;           (list e 8 e e 7 e e 9 e)
+;           (list 1 e e e e 4 e e e)
+;           (list e e e 1 e e e e e)
+;           (list e e e e e e e e e)
+;           (list e 5 e e e 3 e e e)
+;           (list e e e 3 e e e e 4)
+;           (list e e e e 5 e e e 6)
+;           (list 7 e e e e e e e e)))
 
 (define (make-empty-row len)
     (if (> len 0) (cons default-hints (make-empty-row (- len 1))) (list)))
@@ -48,8 +84,15 @@
                     (string-append "\n" (row->string (list-ref grid i)))))))
 
 (define (print-grid! grid)
-        (printf (string-append (grid->string grid) "\n\n\n")))
+        (if (equal? #f grid)
+            (printf "Board is unsolvable\n\n")
+            (printf (string-append (grid->string grid) "\n\n\n"))))
 
+(define (show grid)
+        (begin (printf "\n\n")
+               (for ([row grid])
+                    (begin (display row)
+                           (printf "\n")))))
 
 (define (reduce-rows grid)
         (for/list ([row grid])
@@ -97,14 +140,23 @@
 (define (reduce grid)
         (apply-to-houses reduce-rows grid))
 
+; (define (eliminate-lone-singles grid)
+;         (for/list ([row grid])
+;                 (for/list ([cell row])
+;                             (if (list? cell)
+;                                 (if (equal? 1 (length cell))
+;                                     (first cell)
+;                                     cell)
+;                                 cell))))
+
 (define (eliminate-lone-singles grid)
-        (for/list ([row grid])
-                (for/list ([cell row])
-                            (if (list? cell)
-                                (if (equal? 1 (length cell))
-                                    (first cell)
-                                    cell)
-                                cell))))
+        (map (lambda (row) (map (lambda (cell) (if (list? cell)
+                                                   (if (equal? 1 (length cell))
+                                                       (first cell)
+                                                       cell)
+                                                   cell)) 
+                                row))
+             grid))
 
 (define (hidden-single? hint row)
         (let ([contains-hint? (lambda (cell) (if (list? cell)
@@ -130,7 +182,8 @@
         (map eliminate-hidden-singles-from-row grid))
 
 (define (eliminate-hidden-singles grid)
-        (apply-to-houses eliminate-hidden-singles-from-rows grid))
+        (let ([r eliminate-hidden-singles-from-rows])
+             (reduce (groups->rows (r (groups->rows (reduce (transpose (r (transpose (reduce (r grid))))))))))))
 
 ; eliminates hidden and lone singles until the board doesn't change
 ; assumes grid is reduced
@@ -143,46 +196,113 @@
                   (eliminate-singles new-grid)
                   new-grid)))
 
+; returns pair (row . col) of the first row-major cell without a value
+(define (first-unfilled-cell grid)
+        (let* ([first-cols (map (lambda (row) (index-where row list?)) grid)]
+               [first-row (index-where first-cols number?)]
+               [first-col (list-ref first-cols first-row)])
+              (cons first-row first-col)))
 
-(print-grid! easy-board)
-; (display (reduce easy-board))
-(print-grid! (eliminate-singles easy-board))
-(display (eliminate-singles easy-board))
-
-; (display (row->string (group->row easy-board 3 0)))
-
-
-
-; (define reduced-easy-row (reduce-row (list-ref easy-board 0)))
-
-; (display reduced-easy-row)
-
-; (display (reduce-rows easy-board))
+(define (filled-in? grid)
+        (equal? (* r r c c) (apply + (map (lambda (row) (length (filter number? row))) grid))))
 
 
-#|
-1. guess
+; (define (solve grid)
+;         (solve-helper (reduce grid)))
 
-2. reduce
+; returns solved grid or #f if the grid cannot be solved
+(define (solve grid)
+        (let* ([reduced-grid (reduce (eliminate-singles (reduce grid)))]
+               [valid (valid? reduced-grid)])
+              (if valid
+                  (if (filled-in? reduced-grid)
+                      reduced-grid
+                      (let* ([fuf (first-unfilled-cell reduced-grid)]
+                             [row (car fuf)]
+                             [col (cdr fuf)]
+                             [hints (list-ref (list-ref reduced-grid row) col)])
+                            (if (empty? hints)
+                                #f
+                                (try-hints reduced-grid row col hints 0))))
+                  #f)))
 
-3. hidden/lone singles
-    - if changed, go back to step 2
+(define (update-grid grid row-index col-index val)
+        (list-update grid row-index (lambda (row) (list-set row col-index val))))
 
-reduce:
+; returns solved grid
+; or false if the grid is unsolvable
+(define (try-hints grid row col hints index)
+        (if (equal? (length hints) index)
+            #f
+            (let* ([hint (list-ref hints index)]
+                   [new-grid (solve (reduce (update-grid grid row col hint)))])
+                  (if (equal? #f new-grid)
+                      (try-hints grid row col hints (+ index 1))
+                      new-grid))))
 
-b b b
-b b b
-b b b
+(define (valid-rows? grid)
+        (let ([valid-row? (lambda (row) (let ([nums (filter number? row)])
+                                             (equal? (length nums) (set-count (list->set nums)))))])
+              (andmap valid-row? grid)))
 
-b b b
-b b b
-b b b
+(define (valid? grid)
+        (and (valid-rows? grid) (valid-rows? (transpose grid)) (valid-rows? (groups->rows grid))))
 
-b b b
-b b b
-b b b
-
+(define (solved-rows grid)
+        (andmap (lambda (row) (equal? (* r c) (set-count (list->set row)))) grid))
 
 
-|#
+(define (solved? grid)
+        (and (solved-rows grid) (solved-rows (transpose grid)) (solved-rows (groups->rows grid))))
 
+(define (get grid row col)
+        (list-ref (list-ref grid row) col))
+
+(define (unsolvable? grid)
+        (ormap (lambda (row) (member (list) row)) grid))
+
+(define (fill-in grid n)
+        (if (equal? 0 n)
+            grid
+            (let* ([dim (* r c)]
+                   [row (random 0 dim)]
+                   [col (random 0 dim)]
+                   [val (get grid row col)])
+                   (if (number? val)
+                       (fill-in grid n)
+                       (let ([new-grid (update-grid grid row col (random 1 (+ 1 dim)))])
+                            (if (and (valid? new-grid) (not (unsolvable? grid)))
+                                (fill-in new-grid (- n 1))
+                                (fill-in grid n)))))))
+
+(define (generate-grid start-count)
+        (fill-in (make-list (* r c) (make-list (* r c) e)) start-count))
+
+(define (generate-solvable-grid start-count))
+
+; (define (generate-grid cells)
+;         (let* ([start (reduce (make-random-grid (quotient (* r r c c) 5)))]
+;                [solved (solve start)])
+;               (begin (show start)
+;                      (print-grid! solved)
+;                      (if (not (equal? #f solved))
+;                          (display (valid? solved))
+;                          (display "hi")))))
+
+(define (test-solve grid)
+        (let* ([solution (solve grid)]
+               [found-solution (not (equal? #f solution))]
+               [validity (if found-solution (valid? solution) #f)])
+              (if found-solution
+                  (begin (printf "Problem:")
+                         (print-grid! grid)
+                         (printf "Solution:")
+                         (print-grid! solution)
+                         (if validity
+                             (printf "Solution is valid\n")
+                             (printf "Solution is invalid\n")))
+                  (begin (printf "Problem:")
+                         (print-grid! grid)
+                         (printf "Board is unsolvable\n")))))
+
+(test-solve (generate-grid 1))
